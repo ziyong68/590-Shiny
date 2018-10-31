@@ -21,6 +21,13 @@ fire$season <- ifelse(fire$month %in% c("dec","jan","feb"),"winter",
 
 fire$season <- factor(fire$season, levels = c("spring", "summer", "autumn", "winter"))
 
+# Relevel the existing factors month and day
+fire$month <- factor(fire$month, levels = c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))
+fire$day <- factor(fire$day, levels = c("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
+
+# Create log transformed area just like the paper
+fire$ln_area <- log(fire$area+1)
+
 ui <- dashboardPage(skin = "red",
                     
   dashboardHeader(title = "Forest Fire Investigation",titleWidth = 250),
@@ -31,7 +38,7 @@ ui <- dashboardPage(skin = "red",
       
       conditionalPanel(condition = "input.month_filter_option == true",
                        selectInput("month_filter", "Select Months:", 
-                                   choices = c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
+                                   choices = levels(fire$month),
                                    multiple = TRUE, selected = NULL)),
       
       checkboxInput("x_filter_option", "Filter by X spatial coordinates"),
@@ -48,9 +55,12 @@ ui <- dashboardPage(skin = "red",
                                    choices = levels(fire$Y),
                                    multiple = TRUE, selected = NULL)),
       
+      checkboxInput("fire_filter_option", "Filter by data with fire area > 0"),
+      
       menuItem("Introduction", tabName = "introduction"),
       menuItem("Dataset/Correlation", tabName = "preliminary"),
-      menuItem("3D Visualization", tabName = "visualization")
+      menuItem("Boxplot/Distribution", tabName = "distribution"),
+      menuItem("Scatter Plot Visualization", tabName = "visualization")
     )
   ),
   
@@ -86,7 +96,7 @@ ui <- dashboardPage(skin = "red",
               "11. wind - wind speed in km/h: 0.40 to 9.40", br(), 
               "12. rain - outside rain in mm/m2 : 0.0 to 6.4", br(), 
               "13. area - the burned area of the forest (in ha): 0.00 to 1090.84", br(),
-              p(em("(this area output variable is very skewed towards 0.0, thus it undergoes logarithm transform in the original research).")),
+              p(em("(this area output variable is very skewed towards 0.0, thus it undergoes logarithm transform ln(area+1) in the original research).")),
               a("Click here to refer to the research paper.", href = "http://www3.dsi.uminho.pt/pcortez/fires.pdf")
             ),
             tabPanel(
@@ -143,6 +153,38 @@ ui <- dashboardPage(skin = "red",
         )
       ),
       
+      tabItem(tabName = "distribution",
+              fluidRow(
+                box(
+                  title = "Boxplot", width = 6, status = "primary", 
+                  plotOutput("box")
+                ),
+                
+                box(
+                  title = "Variable Controls", width = 6, status = "warning",
+                  selectizeInput("box_x_var", "Select x variable:",
+                                 choices = colnames(fire)[sapply(fire, is.factor)],
+                                 selected = "X"),
+                  selectizeInput("box_y_var", "Select y variable:", 
+                                 choices = colnames(fire)[sapply(fire, is.numeric)],
+                                 selected = "RH"),
+                  selectizeInput("box_fill_var", "Select filling variable:", 
+                                 choices = c('season','month'),
+                                 selected = "season"),
+                  checkboxInput("jitter", "Show jitter to get a random spread of data points"),
+                  downloadButton('downloadPlot','Download Box Plot')
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = "Histogram", width = 6, status = "primary", 
+                  plotOutput("histogram")
+                )
+              )
+              
+      ),
+      
       tabItem(tabName = "visualization",
         fluidRow(
           box(
@@ -151,8 +193,10 @@ ui <- dashboardPage(skin = "red",
             "*You can click the camera icon to download a static image of the 3D plot if opening the app in browser. This plotly feature won't work in R studio."
           ),
           
+         column(width = 6,
           box(
-            title = "Controls", width = 6, status = "warning", 
+            title = "Variable Controls", width = NULL, status = "warning",
+            "You can hover over the scatter plot and the plotly function icons will show up. Try panning and rotating the plot to an angle you want to look at.",
             selectizeInput("x_var", "Select x variable:",
                            choices = colnames(fire)[sapply(fire, is.numeric)],
                            selected = "temp"),
@@ -165,8 +209,16 @@ ui <- dashboardPage(skin = "red",
             selectizeInput("col_var", "Select color variable:", 
                            choices = colnames(fire)[sapply(fire, is.numeric)],
                            selected = "area")
+          ),
+         
+          box(
+            title = "2D Scatter Plot", width = NULL, status = "primary",
+            plotOutput("plot2", height = 300,click = "plot2_click"),
+            "Coordinate positions of cursor:", br(),
+            verbatimTextOutput("click_info")
           )
-        )
+         )
+       )
       )
     )
   )
@@ -178,7 +230,8 @@ server <- function(input, output, session) {
   getData <- reactive({
     filtered_fire <- (fire %>% {if(!is.null(input$month_filter)) filter(., month %in% input$month_filter) else .} 
                            %>% {if(!is.null(input$x_filter)) filter(., X %in% input$x_filter) else .}
-                           %>% {if(!is.null(input$y_filter)) filter(., Y %in% input$y_filter) else .})
+                           %>% {if(!is.null(input$y_filter)) filter(., Y %in% input$y_filter) else .}
+                           %>% {if(input$fire_filter_option == TRUE) filter(., area > 0) else .})
   })
   
   # Default the choices to NULL when users unselect fitlering
@@ -225,6 +278,38 @@ server <- function(input, output, session) {
     }
   )
   
+  getboxplot <- reactive({
+    filtered_fire <- getData()
+    if(input$jitter == TRUE){
+      boxp <- (ggplot(filtered_fire, aes(x = get(input$box_x_var), y = get(input$box_y_var), fill = get(input$box_fill_var))) + geom_boxplot() + geom_jitter()
+               +labs(fill = input$box_fill_var, x = input$box_x_var, y = input$box_y_var) + theme_grey(base_size = 18))
+    } else {
+      boxp <- (ggplot(filtered_fire, aes(x = get(input$box_x_var), y = get(input$box_y_var), fill = get(input$box_fill_var))) + geom_boxplot()
+               +labs(fill = input$box_fill_var, x = input$box_x_var, y = input$box_y_var) + theme_grey(base_size = 18))
+    }
+    
+  })
+  
+  # Boxplot
+  output$box <- renderPlot({
+    hist <- getboxplot()
+    hist
+  })
+  
+  # Boxplot for download
+  output$downloadPlot <- downloadHandler(
+    filename = function(){"boxplot.png"},
+    content = function(file){
+      ggsave(file,plot=getboxplot(), width = 12, height = 8)
+    }
+  )
+  
+  # Histogram
+  output$histogram <- renderPlot({
+    (ggplot(getData(), aes(x = get(input$box_y_var), color = get(input$box_fill_var))) 
+    + geom_histogram(fill = "white") + facet_grid(.~get(input$box_fill_var))+labs(color = input$box_fill_var, x = input$box_y_var) + theme_grey(base_size = 18))
+  })
+  
   # 3D scatter plot
   output$plot3d <- renderPlotly({
     filtered_fire <- getData()
@@ -235,6 +320,15 @@ server <- function(input, output, session) {
               ))
   })
   
+  # 2D scatter plot
+  output$plot2 <- renderPlot({
+    filtered_fire <- getData()
+    ggplot(filtered_fire, aes(x = get(input$x_var), y = get(input$y_var))) + geom_point() + labs(x = input$x_var, y = input$y_var)
+  })
+  
+  output$click_info <- renderText({
+    paste0("x=", input$plot2_click$x, "\ny=", input$plot2_click$y)
+  })
 }
 
 shinyApp(ui, server)
