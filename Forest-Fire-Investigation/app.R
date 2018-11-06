@@ -1,11 +1,43 @@
-# Call the necessary libraries
-library(shiny)
-library(shinydashboard)
-library(corrplot)
-library(MathJaxR)
-library(plotly)
-library(ggplot2)
-library(tidyverse)
+# # Call the necessary libraries
+# library(shiny)
+# library(shinydashboard)
+# library(corrplot)
+# 
+# # If you don't have MathJax, its installation requires devtools
+# install.packages("devtools")
+# library(devtools)
+# install_github("vnijs/MathJaxR")
+# library(MathJaxR)
+# 
+# library(plotly)
+# library(ggplot2)
+# library(tidyverse)
+
+# The above code assumes you have the common R data wrangling packages
+# Otherwise, run line 20 - 40 to install and attach packages depending on existence.
+
+# Define a pkgsummon function to check existence of package before installing
+pkgsummon<- function(x){
+  if(!require(x, character.only = TRUE)){
+    install.packages(x, dependencies = TRUE)
+    library(x, character.only = TRUE)
+  }
+}
+
+pkgsummon('shiny')
+pkgsummon('shinydashboard')
+pkgsummon('corrplot')
+pkgsummon('plotly')
+pkgsummon('ggplot2')
+pkgsummon('tidyverse')
+
+# If you don't have MathJax, it will install devtools then MathJaxR from Github before attaching
+if(!require('MathJaxR', character.only = TRUE)){
+  install.packages('devtools', dependencies = TRUE)
+  library('devtools', character.only = TRUE)
+  install_github("vnijs/MathJaxR")
+  library('MathJaxR', character.only = TRUE)
+}
 
 # Read in data once
 fire <- read.csv("Data/forestfires.csv")
