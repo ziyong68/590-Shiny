@@ -60,6 +60,10 @@ fire$day <- factor(fire$day, levels = c("mon", "tue", "wed", "thu", "fri", "sat"
 # Create log transformed area just like the paper
 fire$ln_area <- log(fire$area+1)
 
+# Define column names of factor variables
+var_factor <- colnames(fire)[sapply(fire, is.factor)]
+var_numeric <- colnames(fire)[sapply(fire, is.numeric)]
+
 ui <- dashboardPage(skin = "red",
                     
   dashboardHeader(title = "Forest Fire Investigation",titleWidth = 250),
@@ -195,10 +199,10 @@ ui <- dashboardPage(skin = "red",
                 box(
                   title = "Variable Controls", width = 6, status = "warning",
                   selectizeInput("box_x_var", "Select x variable:",
-                                 choices = colnames(fire)[sapply(fire, is.factor)],
+                                 choices = var_factor,
                                  selected = "X"),
                   selectizeInput("box_y_var", "Select y variable:", 
-                                 choices = colnames(fire)[sapply(fire, is.numeric)],
+                                 choices = var_numeric,
                                  selected = "RH"),
                   selectizeInput("box_fill_var", "Select filling variable:", 
                                  choices = c('season','month'),
@@ -230,16 +234,16 @@ ui <- dashboardPage(skin = "red",
             title = "Variable Controls", width = NULL, status = "warning",
             "You can hover over the scatter plot and the plotly function icons will show up. Try panning and rotating the plot to an angle you want to look at.",
             selectizeInput("x_var", "Select x variable:",
-                           choices = colnames(fire)[sapply(fire, is.numeric)],
+                           choices = var_numeric,
                            selected = "temp"),
             selectizeInput("y_var", "Select y variable:", 
-                           choices = colnames(fire)[sapply(fire, is.numeric)],
+                           choices = var_numeric,
                            selected = "wind"),
             selectizeInput("z_var", "Select z variable:", 
-                           choices = colnames(fire)[sapply(fire, is.numeric)],
+                           choices = var_numeric,
                            selected = "RH"),
             selectizeInput("col_var", "Select color variable:", 
-                           choices = colnames(fire)[sapply(fire, is.numeric)],
+                           choices = var_numeric,
                            selected = "area")
           ),
          
