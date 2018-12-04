@@ -122,7 +122,8 @@ ui <- dashboardPage(skin = "red",
       menuItem("Boxplot/Distribution", tabName = "distribution"),
       menuItem("Scatter Plot Visualization", tabName = "visualization"),
       menuItem("Support Vector Machines", tabName = "SVM"),
-      menuItem("Random Forest", tabName = "randomForest")
+      menuItem("Random Forest", tabName = "randomForest"),
+      menuItem("Principal Component Analysis", tabName = "PCs")
     )
   ),
   
@@ -338,6 +339,37 @@ ui <- dashboardPage(skin = "red",
                 )
               )
               
+      ),
+      
+      tabItem(tabName = "PCs",
+              fluidRow(
+                box(
+                  title = "Model Summary", width = 6, status = "primary",
+                  verbatimTextOutput("m3sum")
+                ),
+                
+                box(
+                  title = "Variable Choices", width = 6, status = "warning",
+                  selectInput("pc_var", "Select variables to be included in PCA:", 
+                                 choices = var_numeric, multiple = TRUE,
+                                 selected = c("FFMC","DMC","DC","ISI","temp","RH","wind","rain","area")),
+                  numericInput("biplot_x_var", "Biplot X variable PC:", 1, step = 1),
+                  numericInput("biplot_y_var", "Biplot Y variable PC:", 2, step = 1)
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = "PC Biplot", width = 6, status = "primary",
+                  plotOutput("pc_biplot", height = 500)
+                ),
+                
+                box(
+                  title = "Cumulative Prop. of variance explained", width = 6, status = "primary",
+                  plotOutput("plot_cpve", height = 500)
+                )
+              )
+              
       )
     )
   )
@@ -536,6 +568,27 @@ server <- function(input, output, session) {
     t2 <- rforest_pred_table()
     pred_acc <- sum(diag(t2))/sum(t2)
     pred_acc
+  })
+  
+  # Principle Component Analysis
+  getPC <- reactive({
+  PCs <- prcomp(select(fire, input$pc_var) , center = TRUE, scale = TRUE)
+  })
+  
+  output$m3sum <- renderPrint({
+  PCs <- getPC()
+  PCs
+  })
+  
+  output$pc_biplot <- renderPlot({
+  PCs <- getPC()
+  biplot(PCs, choices = c(input$biplot_x_var,input$biplot_y_var), cex = 0.8)
+  })
+  
+  output$plot_cpve <- renderPlot({
+  PCs <- getPC()
+  plot(cumsum(PCs$sdev^2/sum(PCs$sdev^2)), xlab = "Principal Component", 
+       ylab = "Cum. Prop of Variance Explained", ylim = c(0, 1), type = 'b')
   })
 }
 
