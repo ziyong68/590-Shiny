@@ -30,6 +30,9 @@ pkgsummon('corrplot')
 pkgsummon('plotly')
 pkgsummon('ggplot2')
 pkgsummon('tidyverse')
+pkgsummon('caret')
+pkgsummon('kernlab')
+pkgsummon('randomForest')
 
 # If you don't have MathJax, it will install devtools then MathJaxR from Github before attaching
 if(!require('MathJaxR', character.only = TRUE)){
@@ -64,6 +67,27 @@ fire$ln_area <- log(fire$area+1)
 var_factor <- colnames(fire)[sapply(fire, is.factor)]
 var_numeric <- colnames(fire)[sapply(fire, is.numeric)]
 
+# Define a normalize function to transform variables to a value between 0 and 1
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))  # subtract the min value in x and divide by the range of values in x.
+}
+
+# Dataset for support vector machines
+fire2_full <- fire %>% select(FFMC, DMC, DC, ISI, temp, rain, RH, wind, area) %>% 
+  transmute(norm_FFMC = normalize(FFMC),
+           norm_DMC = normalize(DMC),
+           norm_DC = normalize(DC),
+           norm_ISI = normalize(ISI),
+           norm_temp = normalize(temp),
+           norm_rain = normalize(rain),
+           norm_RH = normalize(RH),
+           norm_wind = normalize(wind),
+           isFire = factor(ifelse(area > 0, 1, 0), labels = c("No Fire", "Fire"))
+  )
+
+# Dataset for random forest
+fire3 <- fire %>% mutate(isFire = factor(ifelse(area > 0, 1, 0), labels = c("No Fire", "Fire"))) %>% select(-ln_area, -area, -season)
+
 ui <- dashboardPage(skin = "red",
                     
   dashboardHeader(title = "Forest Fire Investigation",titleWidth = 250),
@@ -96,7 +120,9 @@ ui <- dashboardPage(skin = "red",
       menuItem("Introduction", tabName = "introduction"),
       menuItem("Dataset/Correlation", tabName = "preliminary"),
       menuItem("Boxplot/Distribution", tabName = "distribution"),
-      menuItem("Scatter Plot Visualization", tabName = "visualization")
+      menuItem("Scatter Plot Visualization", tabName = "visualization"),
+      menuItem("Support Vector Machines", tabName = "SVM"),
+      menuItem("Random Forest", tabName = "randomForest")
     )
   ),
   
@@ -255,6 +281,63 @@ ui <- dashboardPage(skin = "red",
           )
          )
        )
+      ),
+      
+      tabItem(tabName = "SVM",
+              fluidRow(
+                box(
+                  title = "Model Summary", width = 6, status = "primary",
+                  verbatimTextOutput("m1sum")
+                ),
+                
+                box(
+                  title = "Model Parameters", width = 6, status = "warning",
+                  numericInput("seed_num", "Random Seed Number:", 68, step = 1),
+                  sliderInput("train_fraction", "Training Fraction (full dataset):", min = 0, max = 1, value = 0.6, step = 0.1),
+                  selectInput("svm_var", "Select normalized variables to be trained on:", 
+                              choices = c('norm_FFMC', 'norm_DMC', 'norm_DC', 'norm_ISI', 'norm_temp', 'norm_rain', 'norm_RH', 'norm_wind'),
+                              multiple = TRUE, selected = c('norm_temp', 'norm_rain', 'norm_RH', 'norm_wind')),
+                  selectizeInput("kernel_par", "Select kernal function used in training:", 
+                                 choices = c('rbfdot', 'polydot', 'vanilladot', 'tanhdot', 'laplacedot', 'besseldot', 'anovadot', 'splinedot'),
+                                 selected = "laplacedot")
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = "Prediction Table", width = 6, status = "primary",
+                  tableOutput("t1"),
+                  h4('Prediction Accuracy:'),
+                  verbatimTextOutput("t1_pred_acc")
+                )
+              )
+              
+      ),
+      
+      tabItem(tabName = "randomForest",
+              fluidRow(
+                box(
+                  title = "Model Summary", width = 6, status = "primary",
+                  verbatimTextOutput("m2sum")
+                ),
+                
+                box(
+                  title = "Model Parameters", width = 6, status = "warning",
+                  numericInput("seed_num_2", "Random Seed Number:", 68, step = 1),
+                  sliderInput("train_fraction_2", "Training Fraction (full dataset):", min = 0, max = 1, value = 0.6, step = 0.1),
+                  sliderInput("no_trees", "Number of trees:", min = 100, max = 1000, value = 500, step = 100)
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = "Prediction Table", width = 6, status = "primary",
+                  tableOutput("t2"),
+                  h4('Prediction Accuracy:'),
+                  textOutput("t2_pred_acc")
+                )
+              )
+              
       )
     )
   )
@@ -364,6 +447,95 @@ server <- function(input, output, session) {
   
   output$click_info <- renderText({
     paste0("x=", input$plot2_click$x, "\ny=", input$plot2_click$y)
+  })
+  
+  # Columns brought into svm model
+  getFire2 <- reactive({
+    fire2_sub <- fire2_full %>% select(input$svm_var, isFire)
+  })
+  
+  # Prep training rows
+  getTrain <- reactive({
+    set.seed(input$seed_num)
+    fire2_sub <- getFire2()
+    train <- createDataPartition(fire2_sub$isFire, p=input$train_fraction, list = FALSE)
+  })
+  
+  # Support Vector Machine
+  svm_model <- reactive({
+  train <- getTrain()
+  fire2_sub <- getFire2()
+  fire2_train <- fire2_sub[train,]
+  
+  m1 <- ksvm(isFire ~ . , data = fire2_train, kernel = input$kernel_par, C = 1)
+  })
+  
+  output$m1sum <- renderPrint({
+    m1 <- svm_model()
+    m1
+  })
+  
+  # Confusion Matrix
+  svm_pred_table <- reactive({
+    train <- getTrain()
+    fire2_sub <- getFire2()
+    fire2_test <- fire2_sub[-train,]
+    m1 <- svm_model()
+    predFire <- predict(m1, newdata = fire2_test, type = "response")
+    t1 <- with(fire2_test, table(predFire, isFire))
+  })
+  
+  output$t1 <- renderTable({
+    t1 <- svm_pred_table()
+    t1
+  })
+  
+  output$t1_pred_acc <- renderPrint({
+    t1 <- svm_pred_table()
+    pred_acc <- sum(diag(t1))/sum(t1)
+    pred_acc
+  })
+  
+  # Prep training rows for Random Forest
+  getTrain2 <- reactive({
+    set.seed(input$seed_num_2)
+    train <- createDataPartition(fire3$isFire, p=input$train_fraction_2, list = FALSE)
+  })
+  
+  # Random Forest
+  rforest_model <- reactive({
+    train <- getTrain2()
+    fire3_train <- fire3[train,]
+    
+    withProgress(message = 'Running Model', value = 1, 
+                {m2 <- randomForest(isFire ~ . , data = fire3_train,mtry = (ncol(fire3_train)-1)/3, 
+                       ntree = input$no_trees, importance = TRUE)}
+                )
+  })
+  
+  output$m2sum <- renderPrint({
+    m2 <- rforest_model()
+    m2
+  })
+  
+  # Confusion Matrix
+  rforest_pred_table <- reactive({
+    train <- getTrain2()
+    fire3_test <- fire3[-train,]
+    m2 <- rforest_model()
+    predFire <- predict(m2, newdata = fire3_test, type = "response")
+    t2 <- with(fire3_test, table(predFire, isFire))
+  })
+  
+  output$t2 <- renderTable({
+    t2 <- rforest_pred_table()
+    t2
+  })
+  
+  output$t2_pred_acc <- renderText({
+    t2 <- rforest_pred_table()
+    pred_acc <- sum(diag(t2))/sum(t2)
+    pred_acc
   })
 }
 
