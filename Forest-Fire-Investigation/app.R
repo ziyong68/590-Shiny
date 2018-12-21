@@ -1,46 +1,47 @@
-# # Call the necessary libraries
-# library(shiny)
-# library(shinydashboard)
-# library(corrplot)
-# 
-# # If you don't have MathJax, its installation requires devtools
-# install.packages("devtools")
-# library(devtools)
-# install_github("vnijs/MathJaxR")
-# library(MathJaxR)
-# 
-# library(plotly)
-# library(ggplot2)
-# library(tidyverse)
+# Call the necessary libraries
+library(shiny)
+library(shinydashboard)
+library(corrplot)
+
+# If you don't have MathJax, its installation requires devtools
+library(devtools)
+library(MathJaxR)
+
+library(plotly)
+library(ggplot2)
+library(tidyverse)
+library(caret)
+library(kernlab)
+library(randomForest)
 
 # The above code assumes you have the common R data wrangling packages
 # Otherwise, run line 20 - 40 to install and attach packages depending on existence.
 
-# Define a pkgsummon function to check existence of package before installing
-pkgsummon<- function(x){
-  if(!require(x, character.only = TRUE)){
-    install.packages(x, dependencies = TRUE)
-    library(x, character.only = TRUE)
-  }
-}
-
-pkgsummon('shiny')
-pkgsummon('shinydashboard')
-pkgsummon('corrplot')
-pkgsummon('plotly')
-pkgsummon('ggplot2')
-pkgsummon('tidyverse')
-pkgsummon('caret')
-pkgsummon('kernlab')
-pkgsummon('randomForest')
-
-# If you don't have MathJax, it will install devtools then MathJaxR from Github before attaching
-if(!require('MathJaxR', character.only = TRUE)){
-  install.packages('devtools', dependencies = TRUE)
-  library('devtools', character.only = TRUE)
-  install_github("vnijs/MathJaxR")
-  library('MathJaxR', character.only = TRUE)
-}
+# # Define a pkgsummon function to check existence of package before installing
+# pkgsummon<- function(x){
+#   if(!require(x, character.only = TRUE)){
+#     install.packages(x, dependencies = TRUE)
+#     library(x, character.only = TRUE)
+#   }
+# }
+# 
+# pkgsummon('shiny')
+# pkgsummon('shinydashboard')
+# pkgsummon('corrplot')
+# pkgsummon('plotly')
+# pkgsummon('ggplot2')
+# pkgsummon('tidyverse')
+# pkgsummon('caret')
+# pkgsummon('kernlab')
+# pkgsummon('randomForest')
+# 
+# # If you don't have MathJax, it will install devtools then MathJaxR from Github before attaching
+# if(!require('MathJaxR', character.only = TRUE)){
+#   install.packages('devtools', dependencies = TRUE)
+#   library('devtools', character.only = TRUE)
+#   install_github("vnijs/MathJaxR")
+#   library('MathJaxR', character.only = TRUE)
+# }
 
 # Read in data once
 fire <- read.csv("Data/forestfires.csv")
@@ -82,11 +83,11 @@ fire2_full <- fire %>% select(FFMC, DMC, DC, ISI, temp, rain, RH, wind, area) %>
            norm_rain = normalize(rain),
            norm_RH = normalize(RH),
            norm_wind = normalize(wind),
-           isFire = factor(ifelse(area > 0, 1, 0), labels = c("No Fire", "Fire"))
+           fire_class = factor(ifelse(area > 5, 1, 0), labels = c("Small Fire", "Big Fire"))
   )
 
 # Dataset for random forest
-fire3 <- fire %>% mutate(isFire = factor(ifelse(area > 0, 1, 0), labels = c("No Fire", "Fire"))) %>% select(-ln_area, -area, -season)
+fire3 <- fire %>% mutate(fire_class = factor(ifelse(area > 5, 1, 0), labels = c("Small Fire", "Big Fire"))) %>% select(-ln_area, -area, -season)
 
 ui <- dashboardPage(skin = "red",
                     
@@ -483,14 +484,14 @@ server <- function(input, output, session) {
   
   # Columns brought into svm model
   getFire2 <- reactive({
-    fire2_sub <- fire2_full %>% select(input$svm_var, isFire)
+    fire2_sub <- fire2_full %>% select(input$svm_var, fire_class)
   })
   
   # Prep training rows
   getTrain <- reactive({
     set.seed(input$seed_num)
     fire2_sub <- getFire2()
-    train <- createDataPartition(fire2_sub$isFire, p=input$train_fraction, list = FALSE)
+    train <- createDataPartition(fire2_sub$fire_class, p=input$train_fraction, list = FALSE)
   })
   
   # Support Vector Machine
@@ -499,7 +500,7 @@ server <- function(input, output, session) {
   fire2_sub <- getFire2()
   fire2_train <- fire2_sub[train,]
   
-  m1 <- ksvm(isFire ~ . , data = fire2_train, kernel = input$kernel_par, C = 1)
+  m1 <- ksvm(fire_class ~ . , data = fire2_train, kernel = input$kernel_par, C = 1)
   })
   
   output$m1sum <- renderPrint({
@@ -514,7 +515,7 @@ server <- function(input, output, session) {
     fire2_test <- fire2_sub[-train,]
     m1 <- svm_model()
     predFire <- predict(m1, newdata = fire2_test, type = "response")
-    t1 <- with(fire2_test, table(predFire, isFire))
+    t1 <- with(fire2_test, table(predFire, fire_class))
   })
   
   output$t1 <- renderTable({
@@ -531,7 +532,7 @@ server <- function(input, output, session) {
   # Prep training rows for Random Forest
   getTrain2 <- reactive({
     set.seed(input$seed_num_2)
-    train <- createDataPartition(fire3$isFire, p=input$train_fraction_2, list = FALSE)
+    train <- createDataPartition(fire3$fire_class, p=input$train_fraction_2, list = FALSE)
   })
   
   # Random Forest
@@ -540,7 +541,7 @@ server <- function(input, output, session) {
     fire3_train <- fire3[train,]
     
     withProgress(message = 'Running Model', value = 1, 
-                {m2 <- randomForest(isFire ~ . , data = fire3_train,mtry = (ncol(fire3_train)-1)/3, 
+                {m2 <- randomForest(fire_class ~ . , data = fire3_train,mtry = (ncol(fire3_train)-1)/3, 
                        ntree = input$no_trees, importance = TRUE)}
                 )
   })
@@ -556,7 +557,7 @@ server <- function(input, output, session) {
     fire3_test <- fire3[-train,]
     m2 <- rforest_model()
     predFire <- predict(m2, newdata = fire3_test, type = "response")
-    t2 <- with(fire3_test, table(predFire, isFire))
+    t2 <- with(fire3_test, table(predFire, fire_class))
   })
   
   output$t2 <- renderTable({
